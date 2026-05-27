@@ -59,3 +59,11 @@ El PowerPoint se genera con:
 - Bloque 2: fotos ordenadas por tratamiento dentro de cada localidad.
 
 El archivo exportado se nombra con el nombre del protocolo.
+
+## Cambios de la versión V2.2
+
+- Se eliminó el título superior en las slides de fotos del PowerPoint para no duplicar información con la etiqueta inferior.
+- Se agregaron botones para subir y bajar localidades, manteniendo sus textos, trial, momentos y fotos asociadas.
+- El PowerPoint ahora usa secciones reales de PptxGenJS: carátula/índice y una sección por localidad + trial.
+- Se agregó guardado local por proyectos en IndexedDB: permite crear proyectos nuevos, guardar el actual y retomar proyectos recientes desde un selector.
+- El guardado local conserva configuración, localidades, momentos, tratamientos y fotos cargadas. Al incluir fotos, puede ocupar espacio del navegador.

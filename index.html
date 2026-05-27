@@ -16,7 +16,9 @@
       </div>
       <div class="hero-actions">
         <button class="btn light" id="btnStepConfig" type="button">Configuración</button>
-        <button class="btn ghost-light" id="btnClearProject" type="button">Limpiar proyecto</button>
+        <button class="btn ghost-light" id="btnNewProjectTop" type="button">Nuevo proyecto</button>
+        <button class="btn ghost-light" id="btnSaveProjectTop" type="button">Guardar proyecto</button>
+        <button class="btn ghost-light" id="btnClearProject" type="button">Limpiar actual</button>
       </div>
     </header>
 
@@ -42,6 +44,28 @@
     </nav>
 
     <section class="screen active" id="step1">
+      <article class="card project-manager">
+        <div class="section-head compact-head">
+          <div>
+            <p class="kicker">Guardado local</p>
+            <h2>Proyectos guardados en este navegador</h2>
+          </div>
+          <span class="project-status" id="projectNameStatus">Proyecto activo: sin guardar</span>
+        </div>
+        <div class="project-manager-row">
+          <label>Continuar proyecto guardado
+            <select id="projectSelect">
+              <option value="">Seleccionar proyecto guardado...</option>
+            </select>
+          </label>
+          <div class="inline-actions project-actions">
+            <button class="btn primary" id="btnSaveProject" type="button">Guardar actual</button>
+            <button class="btn ghost" id="btnNewProject" type="button">Nuevo proyecto</button>
+          </div>
+        </div>
+        <div class="small-note">El guardado queda en IndexedDB de este navegador/equipo. Como incluye fotos, conviene conservar solo los proyectos necesarios para no ocupar demasiado espacio.</div>
+      </article>
+
       <div class="grid config-grid">
         <article class="card">
           <div class="section-head">
@@ -164,6 +188,6 @@
       typeof window.pptxgen === "function" ? "pptxgen" : "";
   </script>
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-  <script src="app.js?v=2.1.0"></script>
+  <script src="app.js?v=2.2.0"></script>
 </body>
 </html>

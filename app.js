@@ -2,6 +2,8 @@ const DEFAULT_BACKGROUND_URL = "fondo-default.jpg";
 const DB_NAME = "etiquetador_fotos_protocolos_v2";
 const DB_STORE = "project";
 const PROJECT_KEY = "current_project";
+const PROJECT_LIST_KEY = "project_list";
+const ACTIVE_PROJECT_ID_KEY = "active_project_id";
 
 const state = {
   step: 1,
@@ -12,6 +14,7 @@ const state = {
   backgroundSrc: DEFAULT_BACKGROUND_URL,
   locations: [],
   photos: [],
+  currentProjectId: "",
   hydrated: false
 };
 
@@ -22,6 +25,12 @@ const els = {
   step2: $("step2"),
   btnStepConfig: $("btnStepConfig"),
   btnClearProject: $("btnClearProject"),
+  btnNewProject: $("btnNewProject"),
+  btnSaveProject: $("btnSaveProject"),
+  btnNewProjectTop: $("btnNewProjectTop"),
+  btnSaveProjectTop: $("btnSaveProjectTop"),
+  projectSelect: $("projectSelect"),
+  projectNameStatus: $("projectNameStatus"),
   protocolName: $("protocolName"),
   photosPerSlide: $("photosPerSlide"),
   treatmentsInput: $("treatmentsInput"),
@@ -81,6 +90,59 @@ async function dbDelete(key){
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
+}
+
+async function getProjectList(){
+  const list = await dbGet(PROJECT_LIST_KEY);
+  return Array.isArray(list) ? list : [];
+}
+async function setProjectList(list){
+  await dbSet(PROJECT_LIST_KEY, list);
+}
+function makeProjectId(){
+  return "proj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8);
+}
+function getCurrentProjectTitle(){
+  return (els.protocolName?.value || state.protocolName || "Proyecto sin nombre").trim() || "Proyecto sin nombre";
+}
+async function upsertProjectInList(projectId, title){
+  const now = new Date().toISOString();
+  const list = await getProjectList();
+  const existing = list.find(p => p.id === projectId);
+  if(existing){
+    existing.title = title || existing.title || "Proyecto sin nombre";
+    existing.updatedAt = now;
+  }else{
+    list.unshift({ id: projectId, title: title || "Proyecto sin nombre", updatedAt: now });
+  }
+  list.sort((a,b)=>String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  await setProjectList(list.slice(0, 20));
+}
+async function refreshProjectSelector(){
+  if(!els.projectSelect) return;
+  const list = await getProjectList();
+  els.projectSelect.innerHTML = `<option value="">Seleccionar proyecto guardado...</option>` + list.map(item=>{
+    const date = item.updatedAt ? new Date(item.updatedAt).toLocaleString("es-AR") : "";
+    return `<option value="${escapeHtml(item.id)}" ${item.id === state.currentProjectId ? "selected" : ""}>${escapeHtml(item.title)}${date ? " · " + escapeHtml(date) : ""}</option>`;
+  }).join("");
+  if(els.projectNameStatus){
+    els.projectNameStatus.textContent = state.currentProjectId ? `Proyecto activo: ${getCurrentProjectTitle()}` : "Proyecto activo: sin guardar";
+  }
+}
+function resetCurrentProject(){
+  state.protocolName = "";
+  state.treatmentsInput = "";
+  state.photosPerSlide = 3;
+  state.qualityMode = "original";
+  state.backgroundSrc = DEFAULT_BACKGROUND_URL;
+  state.locations = [{id:uid("loc"), name:"Localidad 1", trial:"", momentsText:"10 DDA |\n20 DDA |"}];
+  state.photos = [];
+  state.step = 1;
+  state.currentProjectId = makeProjectId();
+  if(els.protocolName) els.protocolName.value = "";
+  if(els.treatmentsInput) els.treatmentsInput.value = "";
+  if(els.photosPerSlide) els.photosPerSlide.value = "3";
+  if(els.qualityMode) els.qualityMode.value = "original";
 }
 function debounce(fn, wait=450){
   let t;
@@ -187,6 +249,17 @@ function removeLocation(locId){
   renderAll();
   saveProject();
 }
+function moveLocation(locId, delta){
+  syncLocationsFromEditor();
+  const idx = state.locations.findIndex(l=>l.id === locId);
+  const target = idx + delta;
+  if(idx < 0 || target < 0 || target >= state.locations.length) return;
+  const temp = state.locations[idx];
+  state.locations[idx] = state.locations[target];
+  state.locations[target] = temp;
+  renderAll();
+  saveProject();
+}
 function syncLocationsFromEditor(){
   state.locations = getLocations().map(loc=>({id:loc.id, name:loc.name, trial:loc.trial, momentsText:loc.momentsText}));
 }
@@ -209,7 +282,11 @@ function renderLocationsEditor(){
             <input data-location-trial="${escapeHtml(loc.id)}" type="text" value="${escapeHtml(loc.trial || "")}" placeholder="Ej: CG01">
           </label>
         </div>
-        <button class="btn danger" data-action="remove-location" data-location-id="${escapeHtml(loc.id)}" type="button">Eliminar</button>
+        <div class="location-editor-actions">
+          <button class="icon-btn" data-action="move-location-up" data-location-id="${escapeHtml(loc.id)}" type="button" ${idx === 0 ? "disabled" : ""}>↑ Subir</button>
+          <button class="icon-btn" data-action="move-location-down" data-location-id="${escapeHtml(loc.id)}" type="button" ${idx === state.locations.length - 1 ? "disabled" : ""}>↓ Bajar</button>
+          <button class="btn danger" data-action="remove-location" data-location-id="${escapeHtml(loc.id)}" type="button">Eliminar</button>
+        </div>
       </div>
       <label class="wide-label">Momentos de evaluación de esta localidad
         <textarea data-location-moments="${escapeHtml(loc.id)}" placeholder="Un momento por línea. Usá | para agregar fecha. Ej:&#10;10 DDA | 2026-05-20&#10;20 DDA | 2026-06-03">${escapeHtml(loc.momentsText || "")}</textarea>
@@ -220,6 +297,12 @@ function renderLocationsEditor(){
   });
   els.locationsEditor.querySelectorAll("[data-action='remove-location']").forEach(btn=>{
     btn.addEventListener("click",()=>removeLocation(btn.dataset.locationId));
+  });
+  els.locationsEditor.querySelectorAll("[data-action='move-location-up']").forEach(btn=>{
+    btn.addEventListener("click",()=>moveLocation(btn.dataset.locationId, -1));
+  });
+  els.locationsEditor.querySelectorAll("[data-action='move-location-down']").forEach(btn=>{
+    btn.addEventListener("click",()=>moveLocation(btn.dataset.locationId, 1));
   });
   els.locationsEditor.querySelectorAll("input,textarea").forEach(input=>{
     input.addEventListener("input",()=>{ syncLocationsFromEditor(); renderStats(); renderProjectPreview(); saveProject(); });
@@ -479,7 +562,7 @@ function renderProjectPreview(){
   els.projectPreview.innerHTML = meta.locations.map(loc=>{
     const count = state.photos.filter(p=>p.locationId === loc.id).length;
     const moments = loc.moments.map(m=>m.date ? `${m.name} (${m.date})` : m.name).join(" · ") || "Sin momentos";
-    return `<div class="assignment-row"><strong>${escapeHtml(loc.name)}</strong><small>${escapeHtml(moments)}<br>${count} foto(s)</small></div>`;
+    return `<div class="assignment-row"><strong>${escapeHtml(loc.name)} · ${escapeHtml(loc.trial || "Sin trial")}</strong><small>${escapeHtml(moments)}<br>${count} foto(s)</small></div>`;
   }).join("");
 }
 function renderAll(){
@@ -596,11 +679,10 @@ function addSectionSlide(slide, meta, title, subtitle){
   addBackground(slide, meta);
   addTitle(slide, title, subtitle);
 }
-async function addPhotoRow(slide, photos, bottomLabels, footerText, meta, headerText){
+async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
   addBackground(slide, meta);
-  slide.addText(headerText,{x:.75,y:.55,w:11.9,h:.32,fontFace:"Arial",fontSize:16,bold:true,color:"003B65",fit:"shrink"});
   const n = photos.length;
-  const area = {x:.55,y:1.18,w:12.25,h:5.08};
+  const area = {x:.55,y:.82,w:12.25,h:5.42};
   const labelH = .38;
   const gap = .17;
   const cellW = (area.w - gap*(n-1))/n;
@@ -629,37 +711,40 @@ async function createPptBlob(){
   pptx.title = meta.protocolName;
   pptx.theme = {headFontFace:"Arial",bodyFontFace:"Arial",lang:"es-AR"};
 
-  let slide = pptx.addSlide();
+  pptx.addSection({ title: "Carátula e índice" });
+  let slide = pptx.addSlide({ sectionTitle: "Carátula e índice" });
   addCover(slide, meta);
-  slide = pptx.addSlide();
+  slide = pptx.addSlide({ sectionTitle: "Carátula e índice" });
   addIndexSlide(slide, meta);
 
   for(const loc of meta.locations){
-    slide = pptx.addSlide();
+    const sectionTitle = `${loc.name} · ${loc.trial || "Sin trial"}`;
+    pptx.addSection({ title: sectionTitle });
+    slide = pptx.addSlide({ sectionTitle });
     addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 1 · Fotos ordenadas por momento`);
 
     for(const moment of loc.moments){
       const photosMoment = state.photos.filter(p=>p.locationId === loc.id && p.momentId === moment.id && p.treatmentId).sort((a,b)=>a.order-b.order);
       const ordered = meta.treatments.flatMap(t=>photosMoment.filter(p=>p.treatmentId === t.id));
       for(const group of chunk(ordered, meta.photosPerSlide)){
-        slide = pptx.addSlide();
+        slide = pptx.addSlide({ sectionTitle });
         const labels = group.map(p=>(meta.treatments.find(t=>t.id === p.treatmentId) || {}).name || "");
         const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Momento: ${moment.name}   |   Fecha: ${moment.date || ""}`;
-        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${loc.trial || "Sin trial"} · ${moment.name} · Por tratamiento`);
+        await addPhotoRow(slide, group, labels, footer, meta);
       }
     }
 
-    slide = pptx.addSlide();
+    slide = pptx.addSlide({ sectionTitle });
     addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 2 · Fotos ordenadas por tratamiento`);
 
     for(const treatment of meta.treatments){
       const photosTreat = state.photos.filter(p=>p.locationId === loc.id && p.treatmentId === treatment.id).sort((a,b)=>a.order-b.order);
       const ordered = loc.moments.flatMap(m=>photosTreat.filter(p=>p.momentId === m.id));
       for(const group of chunk(ordered, meta.photosPerSlide)){
-        slide = pptx.addSlide();
+        slide = pptx.addSlide({ sectionTitle });
         const labels = group.map(p=>(loc.moments.find(m=>m.id === p.momentId) || {}).name || "");
         const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Tratamiento: ${treatment.name}`;
-        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${loc.trial || "Sin trial"} · ${treatment.name} · Por momento`);
+        await addPhotoRow(slide, group, labels, footer, meta);
       }
     }
   }
@@ -725,10 +810,12 @@ async function downloadAll(){
   setStatus("Descarga completa generada.");
 }
 
-const saveProject = debounce(async()=>{
+async function writeCurrentProject(){
   if(!state.hydrated) return;
   syncLocationsFromEditor();
+  if(!state.currentProjectId) state.currentProjectId = makeProjectId();
   const project = {
+    id: state.currentProjectId,
     protocolName: els.protocolName.value,
     treatmentsInput: els.treatmentsInput.value,
     photosPerSlide: els.photosPerSlide.value,
@@ -736,13 +823,19 @@ const saveProject = debounce(async()=>{
     backgroundSrc: state.backgroundSrc,
     locations: state.locations,
     photos: state.photos,
-    step: state.step
+    step: state.step,
+    updatedAt: new Date().toISOString()
   };
   await dbSet(PROJECT_KEY, project);
-}, 500);
-async function loadProject(){
-  const project = await dbGet(PROJECT_KEY);
+  await dbSet("project_" + state.currentProjectId, project);
+  await dbSet(ACTIVE_PROJECT_ID_KEY, state.currentProjectId);
+  await upsertProjectInList(state.currentProjectId, getCurrentProjectTitle());
+  await refreshProjectSelector();
+}
+const saveProject = debounce(writeCurrentProject, 500);
+async function applyProject(project){
   if(project){
+    state.currentProjectId = project.id || state.currentProjectId || makeProjectId();
     els.protocolName.value = project.protocolName || "";
     els.treatmentsInput.value = project.treatmentsInput || "";
     els.photosPerSlide.value = project.photosPerSlide || "3";
@@ -752,13 +845,38 @@ async function loadProject(){
     state.photos = Array.isArray(project.photos) ? project.photos : [];
     state.step = project.step || 1;
   }else{
-    state.locations = [
-      {id:uid("loc"), name:"Localidad 1", trial:"", momentsText:"10 DDA |\n20 DDA |"}
-    ];
+    resetCurrentProject();
   }
-  state.hydrated = true;
   renderAll();
+  await refreshProjectSelector();
   setStep(state.step || 1);
+}
+async function loadProject(){
+  const activeId = await dbGet(ACTIVE_PROJECT_ID_KEY);
+  let project = activeId ? await dbGet("project_" + activeId) : null;
+  if(!project) project = await dbGet(PROJECT_KEY);
+  if(project && !project.id) project.id = activeId || makeProjectId();
+  state.hydrated = true;
+  await applyProject(project);
+}
+async function loadProjectById(projectId){
+  if(!projectId) return;
+  const project = await dbGet("project_" + projectId);
+  if(!project){ alert("No se encontró ese proyecto guardado."); return; }
+  await dbSet(ACTIVE_PROJECT_ID_KEY, projectId);
+  state.currentProjectId = projectId;
+  await applyProject(project);
+}
+async function startNewProject(){
+  if(state.photos.length || els.protocolName.value || state.locations.length){
+    const ok = confirm("¿Crear un proyecto nuevo? El proyecto actual queda guardado localmente.");
+    if(!ok) return;
+    await writeCurrentProject();
+  }
+  resetCurrentProject();
+  renderAll();
+  setStep(1);
+  await writeCurrentProject();
 }
 function bindEvents(){
   els.progressTabs.forEach(tab=>tab.addEventListener("click",()=>{
@@ -767,13 +885,27 @@ function bindEvents(){
     renderAll(); setStep(target);
   }));
   els.btnStepConfig?.addEventListener("click",()=>setStep(1));
+  els.btnNewProject?.addEventListener("click",()=>startNewProject().catch(err=>{console.error(err);alert(err.message || err);}));
+  els.btnNewProjectTop?.addEventListener("click",()=>startNewProject().catch(err=>{console.error(err);alert(err.message || err);}));
+  els.btnSaveProject?.addEventListener("click",()=>writeCurrentProject().then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
+  els.btnSaveProjectTop?.addEventListener("click",()=>writeCurrentProject().then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
+  els.projectSelect?.addEventListener("change",()=>loadProjectById(els.projectSelect.value).catch(err=>{console.error(err);alert(err.message || err);}));
   els.btnGoPhotos?.addEventListener("click",()=>{ if(!validateConfig()) return; renderAll(); setStep(2); });
   els.btnBackConfig?.addEventListener("click",()=>setStep(1));
   els.btnAddLocation?.addEventListener("click",()=>addLocation());
   els.btnClearPhotos?.addEventListener("click",clearPhotosOnly);
   els.btnClearProject?.addEventListener("click",async()=>{
-    if(!confirm("¿Seguro que querés limpiar todo el proyecto guardado?")) return;
-    await dbDelete(PROJECT_KEY); location.reload();
+    if(!confirm("¿Seguro que querés limpiar el proyecto actual? Las fotos y la configuración se vacían, pero otros proyectos guardados se mantienen.")) return;
+    const currentId = state.currentProjectId;
+    resetCurrentProject();
+    if(currentId) await dbDelete("project_" + currentId);
+    await dbSet(PROJECT_KEY, null);
+    await dbSet(ACTIVE_PROJECT_ID_KEY, state.currentProjectId);
+    const list = (await getProjectList()).filter(p=>p.id !== currentId);
+    await setProjectList(list);
+    renderAll();
+    await refreshProjectSelector();
+    setStep(1);
   });
   [els.protocolName,els.treatmentsInput,els.photosPerSlide,els.qualityMode].filter(Boolean).forEach(el=>{
     el.addEventListener("input",()=>{ renderStats(); renderProjectPreview(); saveProject(); });
