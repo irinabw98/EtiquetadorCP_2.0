@@ -750,8 +750,8 @@ function addBackground(slide, meta){
 function addFooter(slide, text){
   const footerW = 8.5;
   const footerX = (13.333 - footerW) / 2;
-  slide.addShape("rect",{x:footerX,y:6.88,w:footerW,h:.46,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
-  slide.addText(text,{x:footerX+.12,y:6.985,w:footerW-.24,h:.18,fontFace:"Arial",fontSize:8.6,bold:true,color:"35185E",align:"center",fit:"shrink"});
+  slide.addShape("rect",{x:footerX,y:6.84,w:footerW,h:.54,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
+  slide.addText(text,{x:footerX+.12,y:6.965,w:footerW-.24,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
 }
 function addTitle(slide, title, subtitle=""){
   slide.addShape("rect",{x:.75,y:1.25,w:11.85,h:4.85,fill:{color:"FFFFFF",transparency:6},line:{color:"E7DEF5"}});
@@ -790,15 +790,53 @@ function buildSummaryRows(meta, onlyLocation = null){
   return rows;
 }
 
-function addSummaryTable(slide, meta, options = {}){
-  const rows = buildSummaryRows(meta, options.location || null);
+function prepareSummaryRowsForChunk(rows){
+  return rows.map((row, idx) => {
+    const prev = rows[idx - 1];
+    const startsNewGroup = idx === 0 || !prev || prev.locality !== row.locality || prev.trial !== row.trial;
+    return {...row, first: startsNewGroup};
+  });
+}
+
+function splitSummaryRows(rows, maxRows){
+  if(rows.length <= maxRows) return [prepareSummaryRowsForChunk(rows)];
+  const chunks = [];
+  let current = [];
+  let i = 0;
+  while(i < rows.length){
+    const row = rows[i];
+    const group = [];
+    while(i < rows.length && rows[i].locality === row.locality && rows[i].trial === row.trial){
+      group.push(rows[i]);
+      i++;
+    }
+    if(group.length > maxRows){
+      for(let j=0;j<group.length;j+=maxRows){
+        if(current.length){
+          chunks.push(prepareSummaryRowsForChunk(current));
+          current = [];
+        }
+        chunks.push(prepareSummaryRowsForChunk(group.slice(j, j + maxRows)));
+      }
+      continue;
+    }
+    if(current.length && current.length + group.length > maxRows){
+      chunks.push(prepareSummaryRowsForChunk(current));
+      current = [];
+    }
+    current.push(...group);
+  }
+  if(current.length) chunks.push(prepareSummaryRowsForChunk(current));
+  return chunks;
+}
+
+function drawSummaryTable(slide, rows, options = {}){
   const x = options.x ?? 1.0;
   const y = options.y ?? 2.25;
   const w = options.w ?? 11.35;
-  const maxH = options.h ?? 3.95;
   const headerH = options.headerH ?? .34;
-  const rowH = Math.max(.18, Math.min(options.rowH ?? .30, (maxH - headerH) / Math.max(1, rows.length)));
-  const fontSize = Math.max(5.6, Math.min(options.fontSize ?? 8, rowH * 21));
+  const rowH = options.rowH ?? .30;
+  const fontSize = options.fontSize ?? 8;
   const colW = options.colW || [2.55, 1.65, 5.95, 1.2];
   const headers = ["Localidad", "Trial", "Momento", "Fotos"];
   const totalW = colW.reduce((a,b)=>a+b,0);
@@ -811,7 +849,7 @@ function addSummaryTable(slide, meta, options = {}){
   let cx = x;
   headers.forEach((header, i)=>{
     slide.addShape("rect",{x:cx,y,w:widths[i],h:headerH,fill:{color:"4B2385"},line:{color:"E7DEF5",pt:.5}});
-    slide.addText(header,{x:cx+.04,y:y+.085,w:widths[i]-.08,h:.12,fontFace:"Arial",fontSize:8.2,bold:true,color:"FFFFFF",align:i===3?"center":"left",fit:"shrink"});
+    slide.addText(header,{x:cx+.04,y:y+.085,w:widths[i]-.08,h:.14,fontFace:"Arial",fontSize:8.2,bold:true,color:"FFFFFF",align:i===3?"center":"left",fit:"shrink"});
     cx += widths[i];
   });
 
@@ -826,7 +864,7 @@ function addSummaryTable(slide, meta, options = {}){
         x:xx+.04,
         y:ry+Math.max(.035, rowH*.22),
         w:widths[col]-.08,
-        h:Math.max(.08,rowH*.42),
+        h:Math.max(.10,rowH*.48),
         fontFace:"Arial",
         fontSize,
         bold:col < 2 && value !== "",
@@ -849,14 +887,56 @@ function addSummaryTable(slide, meta, options = {}){
           const gh = groupRows * rowH;
           const fill = groupStart % 2 === 0 ? "FFFFFF" : "F7F2FF";
           slide.addShape("rect",{x,y:gy,w:widths[0],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
-          slide.addText(rows[groupStart].locality,{x:x+.05,y:gy+gh/2-.07,w:widths[0]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
+          slide.addText(rows[groupStart].locality,{x:x+.05,y:gy+gh/2-.08,w:widths[0]-.1,h:.16,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
           slide.addShape("rect",{x:x+widths[0],y:gy,w:widths[1],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
-          slide.addText(rows[groupStart].trial,{x:x+widths[0]+.05,y:gy+gh/2-.07,w:widths[1]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
+          slide.addText(rows[groupStart].trial,{x:x+widths[0]+.05,y:gy+gh/2-.08,w:widths[1]-.1,h:.16,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
         }
         groupStart = idx + 1;
       }
     });
   }
+}
+
+function addSummaryTable(slide, meta, options = {}){
+  const rows = buildSummaryRows(meta, options.location || null);
+  const x = options.x ?? 1.0;
+  const y = options.y ?? 2.25;
+  const w = options.w ?? 11.35;
+  const maxH = options.h ?? 3.95;
+  const headerH = options.headerH ?? .34;
+  let desiredRowH = options.rowH ?? .30;
+  let fontSize = options.fontSize ?? 8;
+  let maxRows = Math.max(1, Math.floor((maxH - headerH) / desiredRowH));
+
+  if(rows.length > maxRows * 2 && options.allowShrink !== false){
+    desiredRowH = Math.max(.18, Math.min(desiredRowH, (maxH - headerH) / Math.ceil(rows.length / 2)));
+    fontSize = Math.max(5.6, Math.min(fontSize, desiredRowH * 21));
+    maxRows = Math.max(1, Math.floor((maxH - headerH) / desiredRowH));
+  }
+
+  const chunks = splitSummaryRows(rows, maxRows);
+
+  if(chunks.length <= 1){
+    drawSummaryTable(slide, chunks[0] || [], {...options, x, y, w, rowH:desiredRowH, fontSize, headerH});
+    return;
+  }
+
+  const gap = options.columnGap ?? .22;
+  const columns = Math.min(2, chunks.length);
+  const colW = (w - gap * (columns - 1)) / columns;
+  for(let i=0;i<Math.min(2, chunks.length);i++){
+    drawSummaryTable(slide, chunks[i], {
+      ...options,
+      x: x + i * (colW + gap),
+      y,
+      w: colW,
+      rowH: desiredRowH,
+      fontSize: Math.max(6.2, fontSize - .3),
+      headerH,
+      colW: options.compactColW || [1.9,1.25,3.9,.85]
+    });
+  }
+
 }
 
 function addCover(slide, meta){
@@ -884,8 +964,8 @@ function addSectionSlide(slide, meta, title, subtitle, loc = null){
 async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
   addBackground(slide, meta);
   const n = photos.length;
-  const area = {x:.55,y:.82,w:12.25,h:5.42};
-  const labelH = .38;
+  const area = {x:.55,y:1.05,w:12.25,h:5.22};
+  const labelH = .46;
   const gap = .17;
   const cellW = (area.w - gap*(n-1))/n;
   const imgH = area.h - labelH - .08;
@@ -896,7 +976,7 @@ async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
     slide.addShape("rect",{x,y:area.y,w:cellW,h:imgH,fill:{color:"FFFFFF",transparency:0},line:{color:"E7DEF5"}});
     slide.addImage({data:fp.dataUrl,x:x+fit.x,y:area.y+fit.y,w:fit.w,h:fit.h});
     slide.addShape("rect",{x,y:area.y+imgH+.06,w:cellW,h:labelH,fill:{color:"FFFFFF",transparency:0},line:{color:"E7DEF5"}});
-    slide.addText(bottomLabels[i] || "",{x:x+.04,y:area.y+imgH+.13,w:cellW-.08,h:.18,fontFace:"Arial",fontSize:8.2,bold:true,color:"35185E",align:"center",fit:"shrink"});
+    slide.addText(bottomLabels[i] || "",{x:x+.04,y:area.y+imgH+.14,w:cellW-.08,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
   });
   addFooter(slide, footerText);
 }

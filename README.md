@@ -93,3 +93,12 @@ El archivo exportado se nombra con el nombre del protocolo.
 - Los momentos se muestran uno por fila.
 - Las celdas de Localidad y Trial se agrupan visualmente cuando pertenecen a varios momentos de la misma localidad.
 - Cada separador de localidad incluye la misma tabla, filtrada únicamente para esa localidad.
+
+
+## Cambios V2.6
+
+- El footer general del PowerPoint usa tamaño de letra 10.
+- Las etiquetas debajo de cada foto usan tamaño de letra 10.
+- El bloque de fotos y etiquetas se bajó levemente para mejorar la distribución visual de cada filmina.
+- La tabla de carátula e índice se adapta automáticamente: si la cantidad de filas supera el alto disponible, se divide en dos tablas lado a lado.
+- La misma lógica de tabla adaptable se aplica en las carátulas/separadores de cada localidad.
