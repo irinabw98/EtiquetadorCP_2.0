@@ -758,27 +758,128 @@ function addTitle(slide, title, subtitle=""){
   slide.addText(title,{x:1.05,y:1.82,w:11.1,h:.7,fontFace:"Arial",fontSize:29,bold:true,color:"35185E",align:"center",fit:"shrink"});
   if(subtitle) slide.addText(subtitle,{x:1.25,y:2.68,w:10.7,h:.5,fontFace:"Arial",fontSize:15,bold:true,color:"17072C",align:"center",fit:"shrink"});
 }
+function getMomentPhotoCount(loc, moment){
+  return state.photos.filter(p => p.locationId === loc.id && p.momentId === moment.id).length;
+}
+
+function buildSummaryRows(meta, onlyLocation = null){
+  const locations = onlyLocation ? [onlyLocation] : meta.locations;
+  const rows = [];
+  locations.forEach(loc => {
+    const moments = Array.isArray(loc.moments) ? loc.moments : [];
+    if(!moments.length){
+      rows.push({
+        locality: loc.name || "-",
+        trial: loc.trial || "-",
+        moment: "-",
+        photos: String(state.photos.filter(p => p.locationId === loc.id).length),
+        first: true
+      });
+      return;
+    }
+    moments.forEach((moment, idx) => {
+      rows.push({
+        locality: loc.name || "-",
+        trial: loc.trial || "-",
+        moment: moment.date ? `${moment.name} · ${moment.date}` : moment.name,
+        photos: String(getMomentPhotoCount(loc, moment)),
+        first: idx === 0
+      });
+    });
+  });
+  return rows;
+}
+
+function addSummaryTable(slide, meta, options = {}){
+  const rows = buildSummaryRows(meta, options.location || null);
+  const x = options.x ?? 1.0;
+  const y = options.y ?? 2.25;
+  const w = options.w ?? 11.35;
+  const maxH = options.h ?? 3.95;
+  const headerH = options.headerH ?? .34;
+  const rowH = Math.max(.18, Math.min(options.rowH ?? .30, (maxH - headerH) / Math.max(1, rows.length)));
+  const fontSize = Math.max(5.6, Math.min(options.fontSize ?? 8, rowH * 21));
+  const colW = options.colW || [2.55, 1.65, 5.95, 1.2];
+  const headers = ["Localidad", "Trial", "Momento", "Fotos"];
+  const totalW = colW.reduce((a,b)=>a+b,0);
+  const scale = w / totalW;
+  const widths = colW.map(v => v * scale);
+  const tableH = headerH + rowH * rows.length;
+
+  slide.addShape("rect",{x,y,w,h:tableH,fill:{color:"FFFFFF",transparency:2},line:{color:"E7DEF5",pt:1}});
+
+  let cx = x;
+  headers.forEach((header, i)=>{
+    slide.addShape("rect",{x:cx,y,w:widths[i],h:headerH,fill:{color:"4B2385"},line:{color:"E7DEF5",pt:.5}});
+    slide.addText(header,{x:cx+.04,y:y+.085,w:widths[i]-.08,h:.12,fontFace:"Arial",fontSize:8.2,bold:true,color:"FFFFFF",align:i===3?"center":"left",fit:"shrink"});
+    cx += widths[i];
+  });
+
+  rows.forEach((row, idx)=>{
+    const ry = y + headerH + idx * rowH;
+    const fill = idx % 2 === 0 ? "FFFFFF" : "F7F2FF";
+    let xx = x;
+    const values = [row.first ? row.locality : "", row.first ? row.trial : "", row.moment, row.photos];
+    values.forEach((value, col)=>{
+      slide.addShape("rect",{x:xx,y:ry,w:widths[col],h:rowH,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.45}});
+      slide.addText(String(value || ""),{
+        x:xx+.04,
+        y:ry+Math.max(.035, rowH*.22),
+        w:widths[col]-.08,
+        h:Math.max(.08,rowH*.42),
+        fontFace:"Arial",
+        fontSize,
+        bold:col < 2 && value !== "",
+        color:col < 2 ? "35185E" : "17072C",
+        align:col === 3 ? "center" : "left",
+        fit:"shrink"
+      });
+      xx += widths[col];
+    });
+  });
+
+  if(rows.length > 0){
+    let groupStart = 0;
+    rows.forEach((row, idx)=>{
+      const next = rows[idx + 1];
+      if(!next || next.first){
+        const groupRows = idx - groupStart + 1;
+        if(groupRows > 1){
+          const gy = y + headerH + groupStart * rowH;
+          const gh = groupRows * rowH;
+          const fill = groupStart % 2 === 0 ? "FFFFFF" : "F7F2FF";
+          slide.addShape("rect",{x,y:gy,w:widths[0],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
+          slide.addText(rows[groupStart].locality,{x:x+.05,y:gy+gh/2-.07,w:widths[0]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
+          slide.addShape("rect",{x:x+widths[0],y:gy,w:widths[1],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
+          slide.addText(rows[groupStart].trial,{x:x+widths[0]+.05,y:gy+gh/2-.07,w:widths[1]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
+        }
+        groupStart = idx + 1;
+      }
+    });
+  }
+}
+
 function addCover(slide, meta){
   addBackground(slide, meta);
-  addTitle(slide, "Resultados", meta.protocolName);
-  slide.addText(`Localidades: ${meta.locations.length}   |   Tratamientos: ${meta.treatments.length}   |   Momentos: ${countMoments(meta.locations)}`,{x:1.25,y:3.35,w:10.7,h:.35,fontFace:"Arial",fontSize:12,bold:true,color:"6F6680",align:"center"});
+  slide.addShape("rect",{x:.75,y:.62,w:11.85,h:6.08,fill:{color:"FFFFFF",transparency:6},line:{color:"E7DEF5"}});
+  slide.addText("Resultados",{x:1.05,y:.95,w:11.1,h:.48,fontFace:"Arial",fontSize:26,bold:true,color:"35185E",align:"center",fit:"shrink"});
+  slide.addText(meta.protocolName,{x:1.25,y:1.43,w:10.7,h:.35,fontFace:"Arial",fontSize:14,bold:true,color:"17072C",align:"center",fit:"shrink"});
+  slide.addText(`Localidades: ${meta.locations.length}   |   Tratamientos: ${meta.treatments.length}   |   Momentos: ${countMoments(meta.locations)}`,{x:1.25,y:1.82,w:10.7,h:.25,fontFace:"Arial",fontSize:10.5,bold:true,color:"6F6680",align:"center",fit:"shrink"});
+  addSummaryTable(slide, meta, {x:1.0,y:2.22,w:11.35,h:4.05,rowH:.30,fontSize:7.6});
 }
 function addIndexSlide(slide, meta){
   addBackground(slide, meta);
-  slide.addText("Índice del PowerPoint",{x:.75,y:.56,w:12,h:.35,fontFace:"Arial",fontSize:20,bold:true,color:"003B65"});
-  slide.addShape("rect",{x:.8,y:1.05,w:11.75,h:5.6,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
-  const rows = [["Localidad","Trial","Momentos incluidos","Fotos"]];
-  meta.locations.forEach(loc=>{
-    const moments = loc.moments.map(m=>m.date ? `${m.name} (${m.date})` : m.name).join(" · ");
-    const count = state.photos.filter(p=>p.locationId === loc.id).length;
-    rows.push([loc.name, loc.trial || "-", moments || "-", String(count)]);
-  });
-  const tableData = rows.map((row, rIdx)=>row.map(text=>({text, options:{bold:rIdx===0,color:rIdx===0?"FFFFFF":"17072C",fill:rIdx===0?{color:"4B2385"}:{color:"FFFFFF",transparency:0},fontSize:rIdx===0?10:8.2,margin:.06,breakLine:false}})));
-  slide.addTable(tableData,{x:1.05,y:1.3,w:11.25,h:Math.min(5.0,.38*rows.length),border:{type:"solid",color:"E7DEF5",pt:1},colW:[2.15,1.25,6.7,1.15],fontFace:"Arial",valign:"mid",fit:"shrink"});
+  slide.addShape("rect",{x:.75,y:.62,w:11.85,h:6.08,fill:{color:"FFFFFF",transparency:6},line:{color:"E7DEF5"}});
+  slide.addText("Índice del PowerPoint",{x:1.05,y:.95,w:11.1,h:.4,fontFace:"Arial",fontSize:22,bold:true,color:"35185E",align:"center",fit:"shrink"});
+  slide.addText("Detalle por localidad, trial, momento de evaluación y cantidad de fotos cargadas",{x:1.15,y:1.43,w:11,h:.28,fontFace:"Arial",fontSize:10.5,bold:true,color:"6F6680",align:"center",fit:"shrink"});
+  addSummaryTable(slide, meta, {x:1.0,y:1.95,w:11.35,h:4.65,rowH:.30,fontSize:7.6});
 }
-function addSectionSlide(slide, meta, title, subtitle){
+function addSectionSlide(slide, meta, title, subtitle, loc = null){
   addBackground(slide, meta);
-  addTitle(slide, title, subtitle);
+  slide.addShape("rect",{x:.75,y:.72,w:11.85,h:5.98,fill:{color:"FFFFFF",transparency:6},line:{color:"E7DEF5"}});
+  slide.addText(title,{x:1.05,y:1.0,w:11.1,h:.42,fontFace:"Arial",fontSize:23,bold:true,color:"35185E",align:"center",fit:"shrink"});
+  if(subtitle) slide.addText(subtitle,{x:1.25,y:1.48,w:10.7,h:.25,fontFace:"Arial",fontSize:10.5,bold:true,color:"6F6680",align:"center",fit:"shrink"});
+  if(loc) addSummaryTable(slide, meta, {location:loc,x:1.2,y:2.05,w:10.95,h:4.2,rowH:.36,fontSize:8.2,colW:[2.65,1.75,5.7,1.15]});
 }
 async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
   addBackground(slide, meta);
@@ -822,7 +923,7 @@ async function createPptBlob(){
     const sectionTitle = `${loc.name} · ${loc.trial || "Sin trial"}`;
     pptx.addSection({ title: sectionTitle });
     slide = pptx.addSlide({ sectionTitle });
-    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 1 · Fotos ordenadas por momento`);
+    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 1 · Fotos ordenadas por momento`, loc);
 
     for(const moment of loc.moments){
       const photosMoment = state.photos.filter(p=>p.locationId === loc.id && p.momentId === moment.id && p.treatmentId).sort((a,b)=>a.order-b.order);
@@ -837,7 +938,7 @@ async function createPptBlob(){
     }
 
     slide = pptx.addSlide({ sectionTitle });
-    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 2 · Fotos ordenadas por tratamiento`);
+    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 2 · Fotos ordenadas por tratamiento`, loc);
 
     for(const treatment of meta.treatments){
       const photosTreat = state.photos.filter(p=>p.locationId === loc.id && p.treatmentId === treatment.id).sort((a,b)=>a.order-b.order);

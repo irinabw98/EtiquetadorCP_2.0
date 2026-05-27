@@ -86,3 +86,10 @@ El archivo exportado se nombra con el nombre del protocolo.
 - Se agregaron mensajes de progreso durante la carga y la exportación.
 - El guardado local queda desacoplado del renderizado para reducir bloqueos al cargar muchas fotos.
 - La orientación se sigue fijando al exportar para evitar que PowerPoint rote imágenes por metadatos EXIF.
+
+## Cambios V2.5
+
+- La carátula general del PowerPoint ahora incluye una tabla con las columnas Localidad, Trial, Momento y Fotos.
+- Los momentos se muestran uno por fila.
+- Las celdas de Localidad y Trial se agrupan visualmente cuando pertenecen a varios momentos de la misma localidad.
+- Cada separador de localidad incluye la misma tabla, filtrada únicamente para esa localidad.
