@@ -324,9 +324,27 @@ function renderLocationsEditor(){
 }
 
 function isHeicFile(file){
-  const name = (file?.name || "").toLowerCase();
-  const type = (file?.type || "").toLowerCase();
-  return name.endsWith(".heic") || name.endsWith(".heif") || type.includes("heic") || type.includes("heif");
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  return (
+    name.endsWith(".heic") ||
+    name.endsWith(".heif") ||
+    type === "image/heic" ||
+    type === "image/heif" ||
+    type === "image/heic-sequence" ||
+    type === "image/heif-sequence" ||
+    type.includes("heic") ||
+    type.includes("heif")
+  );
+}
+function isSupportedImageFile(file){
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  return (
+    type.startsWith("image/") ||
+    /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(name) ||
+    isHeicFile(file)
+  );
 }
 function fileToDataUrl(file){
   return new Promise((resolve,reject)=>{
@@ -340,18 +358,77 @@ function loadImage(src){
   return new Promise((resolve,reject)=>{
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = () => reject(new Error("No se pudo leer la imagen. Si es HEIC, verificá que la conversión esté disponible."));
     img.src = src;
   });
 }
+function loadScript(src){
+  return new Promise((resolve,reject)=>{
+    const existing = Array.from(document.scripts).find(s => s.src === src);
+    if(existing){
+      existing.addEventListener("load", resolve, {once:true});
+      existing.addEventListener("error", reject, {once:true});
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("No se pudo cargar la librería HEIC."));
+    document.head.appendChild(script);
+  });
+}
+async function ensureHeicConverter(){
+  if(typeof window.heic2any === "function") return window.heic2any;
+
+  const sources = [
+    "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js",
+    "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"
+  ];
+
+  for(const src of sources){
+    try{
+      await loadScript(src);
+      if(typeof window.heic2any === "function") return window.heic2any;
+    }catch(error){
+      console.warn("No se pudo cargar HEIC desde", src, error);
+    }
+  }
+
+  throw new Error("No se pudo cargar el conversor HEIC. Revisá la conexión a internet o convertí las fotos a JPG antes de cargarlas.");
+}
+async function convertHeicToJpegDataUrl(file){
+  const converter = await ensureHeicConverter();
+  const converted = await converter({
+    blob: file,
+    toType: "image/jpeg",
+    quality: .98
+  });
+  const blob = Array.isArray(converted) ? converted[0] : converted;
+  return fileToDataUrl(blob);
+}
 async function readImageFileAsUsableDataUrl(file){
   if(isHeicFile(file)){
-    if(typeof window.heic2any !== "function") throw new Error("No se pudo cargar la librería HEIC.");
-    const converted = await window.heic2any({ blob:file, toType:"image/jpeg", quality:.98 });
-    const blob = Array.isArray(converted) ? converted[0] : converted;
-    return fileToDataUrl(blob);
+    try{
+      return await convertHeicToJpegDataUrl(file);
+    }catch(error){
+      console.error("Error al convertir HEIC:", error);
+      throw new Error(`No se pudo convertir ${file?.name || "la imagen HEIC"}. ${error?.message || ""}`);
+    }
   }
-  return fileToDataUrl(file);
+
+  const dataUrl = await fileToDataUrl(file);
+
+  try{
+    await loadImage(dataUrl);
+    return dataUrl;
+  }catch(error){
+    const name = String(file?.name || "").toLowerCase();
+    if(name.endsWith(".heic") || name.endsWith(".heif")){
+      return await convertHeicToJpegDataUrl(file);
+    }
+    throw error;
+  }
 }
 async function createPreviewThumbnail(dataUrl, maxSide=420){
   const img = await loadImage(dataUrl);
@@ -414,7 +491,7 @@ function setBoxOpen(locationId, momentId, isOpen){
 }
 
 async function addPhotoFiles(files, locationId, momentId){
-  const clean = Array.from(files || []).filter(f => (f.type || "").startsWith("image/") || /\.(heic|heif)$/i.test(f.name || ""));
+  const clean = Array.from(files || []).filter(isSupportedImageFile);
   if(!clean.length) return;
 
   setStatus(`Preparando ${clean.length} foto(s)...`);
@@ -424,7 +501,7 @@ async function addPhotoFiles(files, locationId, momentId){
   for(let i=0;i<clean.length;i++){
     const file = clean[i];
     try{
-      setStatus(`Cargando foto ${i+1}/${clean.length}: ${file.name}`);
+      setStatus(`${isHeicFile(file) ? "Convirtiendo HEIC" : "Cargando foto"} ${i+1}/${clean.length}: ${file.name}`);
       const fixed = await preparePhotoFile(file);
       next.push({
         id: uid("photo"),
@@ -750,8 +827,8 @@ function addBackground(slide, meta){
 function addFooter(slide, text){
   const footerW = 8.5;
   const footerX = (13.333 - footerW) / 2;
-  slide.addShape("rect",{x:footerX,y:6.84,w:footerW,h:.54,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
-  slide.addText(text,{x:footerX+.12,y:6.965,w:footerW-.24,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
+  slide.addShape("rect",{x:footerX,y:6.82,w:footerW,h:.56,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
+  slide.addText(text,{x:footerX+.12,y:6.94,w:footerW-.24,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
 }
 function addTitle(slide, title, subtitle=""){
   slide.addShape("rect",{x:.75,y:1.25,w:11.85,h:4.85,fill:{color:"FFFFFF",transparency:6},line:{color:"E7DEF5"}});
@@ -790,53 +867,13 @@ function buildSummaryRows(meta, onlyLocation = null){
   return rows;
 }
 
-function prepareSummaryRowsForChunk(rows){
-  return rows.map((row, idx) => {
-    const prev = rows[idx - 1];
-    const startsNewGroup = idx === 0 || !prev || prev.locality !== row.locality || prev.trial !== row.trial;
-    return {...row, first: startsNewGroup};
-  });
-}
-
-function splitSummaryRows(rows, maxRows){
-  if(rows.length <= maxRows) return [prepareSummaryRowsForChunk(rows)];
-  const chunks = [];
-  let current = [];
-  let i = 0;
-  while(i < rows.length){
-    const row = rows[i];
-    const group = [];
-    while(i < rows.length && rows[i].locality === row.locality && rows[i].trial === row.trial){
-      group.push(rows[i]);
-      i++;
-    }
-    if(group.length > maxRows){
-      for(let j=0;j<group.length;j+=maxRows){
-        if(current.length){
-          chunks.push(prepareSummaryRowsForChunk(current));
-          current = [];
-        }
-        chunks.push(prepareSummaryRowsForChunk(group.slice(j, j + maxRows)));
-      }
-      continue;
-    }
-    if(current.length && current.length + group.length > maxRows){
-      chunks.push(prepareSummaryRowsForChunk(current));
-      current = [];
-    }
-    current.push(...group);
-  }
-  if(current.length) chunks.push(prepareSummaryRowsForChunk(current));
-  return chunks;
-}
-
 function drawSummaryTable(slide, rows, options = {}){
   const x = options.x ?? 1.0;
   const y = options.y ?? 2.25;
   const w = options.w ?? 11.35;
   const headerH = options.headerH ?? .34;
   const rowH = options.rowH ?? .30;
-  const fontSize = options.fontSize ?? 8;
+  const fontSize = options.fontSize ?? 7.6;
   const colW = options.colW || [2.55, 1.65, 5.95, 1.2];
   const headers = ["Localidad", "Trial", "Momento", "Fotos"];
   const totalW = colW.reduce((a,b)=>a+b,0);
@@ -849,7 +886,7 @@ function drawSummaryTable(slide, rows, options = {}){
   let cx = x;
   headers.forEach((header, i)=>{
     slide.addShape("rect",{x:cx,y,w:widths[i],h:headerH,fill:{color:"4B2385"},line:{color:"E7DEF5",pt:.5}});
-    slide.addText(header,{x:cx+.04,y:y+.085,w:widths[i]-.08,h:.14,fontFace:"Arial",fontSize:8.2,bold:true,color:"FFFFFF",align:i===3?"center":"left",fit:"shrink"});
+    slide.addText(header,{x:cx+.04,y:y+.085,w:widths[i]-.08,h:.12,fontFace:"Arial",fontSize:8.2,bold:true,color:"FFFFFF",align:i===3?"center":"left",fit:"shrink"});
     cx += widths[i];
   });
 
@@ -857,43 +894,44 @@ function drawSummaryTable(slide, rows, options = {}){
     const ry = y + headerH + idx * rowH;
     const fill = idx % 2 === 0 ? "FFFFFF" : "F7F2FF";
     let xx = x;
-    const values = [row.first ? row.locality : "", row.first ? row.trial : "", row.moment, row.photos];
+    const values = ["", "", row.moment, row.photos];
+
     values.forEach((value, col)=>{
       slide.addShape("rect",{x:xx,y:ry,w:widths[col],h:rowH,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.45}});
-      slide.addText(String(value || ""),{
-        x:xx+.04,
-        y:ry+Math.max(.035, rowH*.22),
-        w:widths[col]-.08,
-        h:Math.max(.10,rowH*.48),
-        fontFace:"Arial",
-        fontSize,
-        bold:col < 2 && value !== "",
-        color:col < 2 ? "35185E" : "17072C",
-        align:col === 3 ? "center" : "left",
-        fit:"shrink"
-      });
+      if(value){
+        slide.addText(value,{
+          x:xx+.05,
+          y:ry + Math.max(.035, rowH/2 - .07),
+          w:widths[col]-.1,
+          h:.14,
+          fontFace:"Arial",
+          fontSize,
+          bold:col === 3,
+          color:"24113F",
+          align:col===3?"center":"left",
+          valign:"mid",
+          fit:"shrink"
+        });
+      }
       xx += widths[col];
     });
   });
 
-  if(rows.length > 0){
-    let groupStart = 0;
-    rows.forEach((row, idx)=>{
-      const next = rows[idx + 1];
-      if(!next || next.first){
-        const groupRows = idx - groupStart + 1;
-        if(groupRows > 1){
-          const gy = y + headerH + groupStart * rowH;
-          const gh = groupRows * rowH;
-          const fill = groupStart % 2 === 0 ? "FFFFFF" : "F7F2FF";
-          slide.addShape("rect",{x,y:gy,w:widths[0],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
-          slide.addText(rows[groupStart].locality,{x:x+.05,y:gy+gh/2-.08,w:widths[0]-.1,h:.16,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
-          slide.addShape("rect",{x:x+widths[0],y:gy,w:widths[1],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
-          slide.addText(rows[groupStart].trial,{x:x+widths[0]+.05,y:gy+gh/2-.08,w:widths[1]-.1,h:.16,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
-        }
-        groupStart = idx + 1;
+  let groupStart = 0;
+  for(let idx = 0; idx <= rows.length; idx++){
+    const changed = idx === rows.length || rows[idx].first;
+    if(changed){
+      if(idx > groupStart){
+        const gy = y + headerH + groupStart * rowH;
+        const gh = (idx - groupStart) * rowH;
+        const fill = groupStart % 2 === 0 ? "FFFFFF" : "F7F2FF";
+        slide.addShape("rect",{x,y:gy,w:widths[0],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
+        slide.addText(rows[groupStart].locality,{x:x+.05,y:gy+gh/2-.07,w:widths[0]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
+        slide.addShape("rect",{x:x+widths[0],y:gy,w:widths[1],h:gh,fill:{color:fill,transparency:0},line:{color:"E7DEF5",pt:.65}});
+        slide.addText(rows[groupStart].trial,{x:x+widths[0]+.05,y:gy+gh/2-.07,w:widths[1]-.1,h:.14,fontFace:"Arial",fontSize,bold:true,color:"35185E",align:"center",valign:"mid",fit:"shrink"});
       }
-    });
+      groupStart = idx;
+    }
   }
 }
 
@@ -904,39 +942,32 @@ function addSummaryTable(slide, meta, options = {}){
   const w = options.w ?? 11.35;
   const maxH = options.h ?? 3.95;
   const headerH = options.headerH ?? .34;
-  let desiredRowH = options.rowH ?? .30;
-  let fontSize = options.fontSize ?? 8;
-  let maxRows = Math.max(1, Math.floor((maxH - headerH) / desiredRowH));
+  const baseRowH = options.rowH ?? .30;
+  const minRowH = options.minRowH ?? .24;
+  const fontSize = options.fontSize ?? 7.6;
+  const colW = options.colW || [2.55, 1.65, 5.95, 1.2];
+  const allowSplit = options.allowSplit !== false;
+  const maxRowsAtBase = Math.max(1, Math.floor((maxH - headerH) / baseRowH));
 
-  if(rows.length > maxRows * 2 && options.allowShrink !== false){
-    desiredRowH = Math.max(.18, Math.min(desiredRowH, (maxH - headerH) / Math.ceil(rows.length / 2)));
-    fontSize = Math.max(5.6, Math.min(fontSize, desiredRowH * 21));
-    maxRows = Math.max(1, Math.floor((maxH - headerH) / desiredRowH));
-  }
+  if(allowSplit && rows.length > maxRowsAtBase && rows.length > 1){
+    const gap = options.splitGap ?? .25;
+    const halfW = (w - gap) / 2;
+    const rowsPerTable = Math.ceil(rows.length / 2);
+    const leftRows = rows.slice(0, rowsPerTable);
+    const rightRows = rows.slice(rowsPerTable);
+    if(rightRows.length) rightRows[0] = {...rightRows[0], first:true};
 
-  const chunks = splitSummaryRows(rows, maxRows);
+    const rowH = Math.max(minRowH, Math.min(baseRowH, (maxH - headerH) / Math.max(leftRows.length, rightRows.length, 1)));
+    const fs = Math.max(6.1, Math.min(fontSize, rowH * 23));
 
-  if(chunks.length <= 1){
-    drawSummaryTable(slide, chunks[0] || [], {...options, x, y, w, rowH:desiredRowH, fontSize, headerH});
+    drawSummaryTable(slide, leftRows, {x,y,w:halfW,headerH,rowH,fontSize:fs,colW});
+    drawSummaryTable(slide, rightRows, {x:x+halfW+gap,y,w:halfW,headerH,rowH,fontSize:fs,colW});
     return;
   }
 
-  const gap = options.columnGap ?? .22;
-  const columns = Math.min(2, chunks.length);
-  const colW = (w - gap * (columns - 1)) / columns;
-  for(let i=0;i<Math.min(2, chunks.length);i++){
-    drawSummaryTable(slide, chunks[i], {
-      ...options,
-      x: x + i * (colW + gap),
-      y,
-      w: colW,
-      rowH: desiredRowH,
-      fontSize: Math.max(6.2, fontSize - .3),
-      headerH,
-      colW: options.compactColW || [1.9,1.25,3.9,.85]
-    });
-  }
-
+  const rowH = Math.max(.18, Math.min(baseRowH, (maxH - headerH) / Math.max(1, rows.length)));
+  const fs = Math.max(5.6, Math.min(fontSize, rowH * 23));
+  drawSummaryTable(slide, rows, {x,y,w,headerH,rowH,fontSize:fs,colW});
 }
 
 function addCover(slide, meta){
@@ -964,7 +995,7 @@ function addSectionSlide(slide, meta, title, subtitle, loc = null){
 async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
   addBackground(slide, meta);
   const n = photos.length;
-  const area = {x:.55,y:1.05,w:12.25,h:5.22};
+  const area = {x:.55,y:1.02,w:12.25,h:5.22};
   const labelH = .46;
   const gap = .17;
   const cellW = (area.w - gap*(n-1))/n;
@@ -976,7 +1007,7 @@ async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
     slide.addShape("rect",{x,y:area.y,w:cellW,h:imgH,fill:{color:"FFFFFF",transparency:0},line:{color:"E7DEF5"}});
     slide.addImage({data:fp.dataUrl,x:x+fit.x,y:area.y+fit.y,w:fit.w,h:fit.h});
     slide.addShape("rect",{x,y:area.y+imgH+.06,w:cellW,h:labelH,fill:{color:"FFFFFF",transparency:0},line:{color:"E7DEF5"}});
-    slide.addText(bottomLabels[i] || "",{x:x+.04,y:area.y+imgH+.14,w:cellW-.08,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
+    slide.addText(bottomLabels[i] || "",{x:x+.04,y:area.y+imgH+.145,w:cellW-.08,h:.24,fontFace:"Arial",fontSize:10,bold:true,color:"35185E",align:"center",fit:"shrink"});
   });
   addFooter(slide, footerText);
 }
@@ -1203,9 +1234,19 @@ function bindEvents(){
   els.bgInput?.addEventListener("change",async e=>{
     const file = e.target.files?.[0];
     if(!file) return;
-    const fixed = await normalizeImageFile(file, "high");
-    state.backgroundSrc = fixed.dataUrl;
-    saveProject();
+    try{
+      setStatus(`Preparando fondo: ${file.name}`);
+      const fixed = await normalizeImageFile(file, "high");
+      state.backgroundSrc = fixed.dataUrl;
+      await saveProject();
+      setStatus("Fondo actualizado.");
+    }catch(error){
+      console.error(error);
+      alert(error?.message || "No se pudo cargar el fondo.");
+      setStatus("No se pudo cargar el fondo.");
+    }finally{
+      e.target.value = "";
+    }
   });
   els.btnDownloadPhotos?.addEventListener("click",()=>downloadPhotos().catch(err=>{console.error(err);alert(err.message || err);setStatus("Error al exportar fotos.");}));
   els.btnDownloadPpt?.addEventListener("click",()=>downloadPpt().catch(err=>{console.error(err);alert(err.message || err);setStatus("Error al exportar PowerPoint.");}));

@@ -97,8 +97,15 @@ El archivo exportado se nombra con el nombre del protocolo.
 
 ## Cambios V2.6
 
-- El footer general del PowerPoint usa tamaño de letra 10.
-- Las etiquetas debajo de cada foto usan tamaño de letra 10.
-- El bloque de fotos y etiquetas se bajó levemente para mejorar la distribución visual de cada filmina.
-- La tabla de carátula e índice se adapta automáticamente: si la cantidad de filas supera el alto disponible, se divide en dos tablas lado a lado.
-- La misma lógica de tabla adaptable se aplica en las carátulas/separadores de cada localidad.
+- Footer general del PowerPoint en tamaño 10.
+- Etiquetas por foto en tamaño 10.
+- Fotos y etiquetas ubicadas un poco más abajo en las filminas.
+- La tabla de carátula se divide automáticamente en dos tablas laterales cuando la cantidad de filas supera el alto disponible.
+
+## Cambios V2.7
+
+- Soporte HEIC/HEIF reforzado.
+- La app acepta `.heic` y `.heif` aunque el navegador no los detecte como `image/*`.
+- Las fotos HEIC se convierten internamente a JPG de alta calidad para vista previa, ZIP y PowerPoint.
+- También se permite HEIC/HEIF como fondo del PowerPoint.
+- Se agregan mensajes de progreso y errores más claros durante la conversión HEIC.
