@@ -67,3 +67,12 @@ El archivo exportado se nombra con el nombre del protocolo.
 - El PowerPoint ahora usa secciones reales de PptxGenJS: carátula/índice y una sección por localidad + trial.
 - Se agregó guardado local por proyectos en IndexedDB: permite crear proyectos nuevos, guardar el actual y retomar proyectos recientes desde un selector.
 - El guardado local conserva configuración, localidades, momentos, tratamientos y fotos cargadas. Al incluir fotos, puede ocupar espacio del navegador.
+
+## Cambios de la versión V2.3
+
+- Las cajas Localidad × Momento recuerdan si están abiertas o comprimidas.
+- Al cargar fotos ya no se expanden todas las cajas automáticamente.
+- Cada caja mantiene el orden en que se van agregando las fotos.
+- Cada caja incluye botón propio para ordenar fotos por nombre.
+- Cada caja incluye botón propio para vaciar únicamente sus fotos.
+- Se mantienen los controles por foto para subir, bajar, rotar y eliminar.

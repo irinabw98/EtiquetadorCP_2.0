@@ -15,6 +15,7 @@ const state = {
   locations: [],
   photos: [],
   currentProjectId: "",
+  boxOpenState: {},
   hydrated: false
 };
 
@@ -137,6 +138,7 @@ function resetCurrentProject(){
   state.backgroundSrc = DEFAULT_BACKGROUND_URL;
   state.locations = [{id:uid("loc"), name:"Localidad 1", trial:"", momentsText:"10 DDA |\n20 DDA |"}];
   state.photos = [];
+  state.boxOpenState = {};
   state.step = 1;
   state.currentProjectId = makeProjectId();
   if(els.protocolName) els.protocolName.value = "";
@@ -373,6 +375,18 @@ function dataUrlToBase64(dataUrl){
   return parts.length > 1 ? parts[1] : "";
 }
 
+function boxKey(locationId, momentId){
+  return `${locationId}__${momentId}`;
+}
+function isBoxOpen(locationId, momentId){
+  const key = boxKey(locationId, momentId);
+  return state.boxOpenState[key] !== false;
+}
+function setBoxOpen(locationId, momentId, isOpen){
+  const key = boxKey(locationId, momentId);
+  state.boxOpenState[key] = Boolean(isOpen);
+}
+
 async function addPhotoFiles(files, locationId, momentId){
   const clean = Array.from(files || []).filter(f => (f.type || "").startsWith("image/") || /\.(heic|heif)$/i.test(f.name || ""));
   if(!clean.length) return;
@@ -418,7 +432,9 @@ function renderDropZones(){
       const photos = groupPhotos(loc.id, moment.id);
       const card = document.createElement("details");
       card.className = "moment-card";
-      card.open = true;
+      card.dataset.locationId = loc.id;
+      card.dataset.momentId = moment.id;
+      card.open = isBoxOpen(loc.id, moment.id);
       card.innerHTML = `
         <summary class="moment-header">
           <div>
@@ -427,6 +443,8 @@ function renderDropZones(){
           </div>
           <div class="moment-actions">
             <button class="icon-btn" data-action="auto-assign-box" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="button">Autoasignar esta caja</button>
+            <button class="icon-btn" data-action="sort-name-box" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="button">Ordenar por nombre</button>
+            <button class="icon-btn danger" data-action="clear-box" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="button">Vaciar caja</button>
           </div>
         </summary>
         <div class="moment-content">
@@ -437,6 +455,10 @@ function renderDropZones(){
           <div class="photo-list">${photos.map(photo=>renderPhotoItem(photo, treatments)).join("")}</div>
         </div>
       `;
+      card.addEventListener("toggle",()=>{
+        setBoxOpen(loc.id, moment.id, card.open);
+        saveProject();
+      });
       els.dropZones.appendChild(card);
     });
   });
@@ -458,6 +480,20 @@ function renderDropZones(){
       e.preventDefault();
       e.stopPropagation();
       autoAssignBox(btn.dataset.locationId, btn.dataset.momentId);
+    });
+  });
+  els.dropZones.querySelectorAll("[data-action='sort-name-box']").forEach(btn=>{
+    btn.addEventListener("click",e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      sortBoxByName(btn.dataset.locationId, btn.dataset.momentId);
+    });
+  });
+  els.dropZones.querySelectorAll("[data-action='clear-box']").forEach(btn=>{
+    btn.addEventListener("click",e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      clearBoxPhotos(btn.dataset.locationId, btn.dataset.momentId);
     });
   });
   els.dropZones.querySelectorAll("[data-action='treatment']").forEach(sel=>{
@@ -536,6 +572,30 @@ function autoAssignBox(locationId, momentId){
   });
   renderAll(); saveProject();
 }
+function sortBoxByName(locationId, momentId){
+  const photos = groupPhotos(locationId, momentId);
+  if(photos.length < 2){
+    alert("Esta caja necesita al menos dos fotos para ordenar.");
+    return;
+  }
+  photos
+    .sort((a,b)=>String(a.fileName || "").localeCompare(String(b.fileName || ""), "es", {numeric:true, sensitivity:"base"}))
+    .forEach((photo, idx)=>{ photo.order = idx; });
+  renderAll();
+  saveProject();
+}
+function clearBoxPhotos(locationId, momentId){
+  const photos = groupPhotos(locationId, momentId);
+  if(!photos.length){
+    alert("Esta caja no tiene fotos para vaciar.");
+    return;
+  }
+  if(!confirm(`¿Eliminar las ${photos.length} foto(s) de esta caja?`)) return;
+  state.photos = state.photos.filter(p=>!(p.locationId === locationId && p.momentId === momentId));
+  renderAll();
+  saveProject();
+}
+
 function clearPhotosOnly(){
   if(!state.photos.length){ alert("No hay fotos cargadas."); return; }
   if(!confirm("¿Eliminar todas las fotos cargadas? La configuración se mantiene.")) return;
@@ -823,6 +883,7 @@ async function writeCurrentProject(){
     backgroundSrc: state.backgroundSrc,
     locations: state.locations,
     photos: state.photos,
+    boxOpenState: state.boxOpenState,
     step: state.step,
     updatedAt: new Date().toISOString()
   };
@@ -843,6 +904,7 @@ async function applyProject(project){
     state.backgroundSrc = project.backgroundSrc || DEFAULT_BACKGROUND_URL;
     state.locations = Array.isArray(project.locations) ? project.locations : [];
     state.photos = Array.isArray(project.photos) ? project.photos : [];
+    state.boxOpenState = project.boxOpenState && typeof project.boxOpenState === "object" ? project.boxOpenState : {};
     state.step = project.step || 1;
   }else{
     resetCurrentProject();
