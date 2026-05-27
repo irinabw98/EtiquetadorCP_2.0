@@ -115,10 +115,12 @@ function getTreatments(){
 function getLocations(){
   return state.locations.map((loc, idx)=>{
     const input = document.querySelector(`[data-location-name="${CSS.escape(loc.id)}"]`);
+    const trialInput = document.querySelector(`[data-location-trial="${CSS.escape(loc.id)}"]`);
     const text = document.querySelector(`[data-location-moments="${CSS.escape(loc.id)}"]`);
     return {
       id: loc.id,
       name: (input?.value || loc.name || `Localidad ${idx+1}`).trim(),
+      trial: (trialInput?.value || loc.trial || "").trim(),
       momentsText: text?.value || loc.momentsText || "",
       moments: parseLines(text?.value || loc.momentsText || "").map(parseMomentLine)
     };
@@ -159,15 +161,18 @@ function validateConfig(){
   if(!meta.locations.length){ alert("Agregá al menos una localidad."); return false; }
   const emptyLoc = meta.locations.find(loc=>!loc.name);
   if(emptyLoc){ alert("Todas las localidades necesitan nombre."); return false; }
+  const emptyTrial = meta.locations.find(loc=>!loc.trial);
+  if(emptyTrial){ alert(`La localidad ${emptyTrial.name || "sin nombre"} necesita trial.`); return false; }
   const noMoments = meta.locations.find(loc=>!loc.moments.length);
   if(noMoments){ alert(`La localidad ${noMoments.name || "sin nombre"} necesita al menos un momento.`); return false; }
   return true;
 }
 
-function addLocation(name="", momentsText=""){
+function addLocation(name="", trial="", momentsText=""){
   state.locations.push({
     id: uid("loc"),
     name: name || `Localidad ${state.locations.length + 1}`,
+    trial: trial || "",
     momentsText: momentsText || "10 DDA |\n20 DDA |"
   });
   renderAll();
@@ -183,7 +188,7 @@ function removeLocation(locId){
   saveProject();
 }
 function syncLocationsFromEditor(){
-  state.locations = getLocations().map(loc=>({id:loc.id, name:loc.name, momentsText:loc.momentsText}));
+  state.locations = getLocations().map(loc=>({id:loc.id, name:loc.name, trial:loc.trial, momentsText:loc.momentsText}));
 }
 function renderLocationsEditor(){
   els.locationsEditor.innerHTML = "";
@@ -196,15 +201,20 @@ function renderLocationsEditor(){
     card.className = "location-editor";
     card.innerHTML = `
       <div class="location-editor-head">
-        <label>Localidad ${idx + 1}
-          <input data-location-name="${escapeHtml(loc.id)}" type="text" value="${escapeHtml(loc.name || "")}" placeholder="Ej: Pergamino">
-        </label>
+        <div class="location-editor-fields">
+          <label>Localidad ${idx + 1}
+            <input data-location-name="${escapeHtml(loc.id)}" type="text" value="${escapeHtml(loc.name || "")}" placeholder="Ej: Pergamino">
+          </label>
+          <label>Trial de esta localidad
+            <input data-location-trial="${escapeHtml(loc.id)}" type="text" value="${escapeHtml(loc.trial || "")}" placeholder="Ej: CG01">
+          </label>
+        </div>
         <button class="btn danger" data-action="remove-location" data-location-id="${escapeHtml(loc.id)}" type="button">Eliminar</button>
       </div>
       <label class="wide-label">Momentos de evaluación de esta localidad
         <textarea data-location-moments="${escapeHtml(loc.id)}" placeholder="Un momento por línea. Usá | para agregar fecha. Ej:&#10;10 DDA | 2026-05-20&#10;20 DDA | 2026-06-03">${escapeHtml(loc.momentsText || "")}</textarea>
       </label>
-      <div class="small-note">Estos momentos solo aplican a esta localidad. Las cajas de fotos se generan con esta información.</div>
+      <div class="small-note">La localidad y su trial viajan juntos en las cajas, el índice y el PowerPoint.</div>
     `;
     els.locationsEditor.appendChild(card);
   });
@@ -323,23 +333,26 @@ function renderDropZones(){
   meta.locations.forEach(loc=>{
     loc.moments.forEach(moment=>{
       const photos = groupPhotos(loc.id, moment.id);
-      const card = document.createElement("article");
+      const card = document.createElement("details");
       card.className = "moment-card";
+      card.open = true;
       card.innerHTML = `
-        <div class="moment-header">
+        <summary class="moment-header">
           <div>
-            <h3>${escapeHtml(loc.name)} · ${escapeHtml(moment.name)}</h3>
+            <h3>${escapeHtml(loc.name)} · ${escapeHtml(loc.trial || "Sin trial")} · ${escapeHtml(moment.name)}</h3>
             <small>${escapeHtml(moment.date || "Sin fecha")} · ${photos.length} foto(s)</small>
           </div>
           <div class="moment-actions">
-            <button class="icon-btn" data-action="auto-assign-box" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="button">Autoasignar</button>
+            <button class="icon-btn" data-action="auto-assign-box" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="button">Autoasignar esta caja</button>
           </div>
+        </summary>
+        <div class="moment-content">
+          <div class="drop-zone" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}">
+            <div><strong>Arrastrá fotos acá</strong><span>${escapeHtml(loc.name)} · ${escapeHtml(loc.trial || "Sin trial")} · ${escapeHtml(moment.name)}</span></div>
+          </div>
+          <input class="hidden box-file-input" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="file" accept="image/*,.heic,.heif" multiple>
+          <div class="photo-list">${photos.map(photo=>renderPhotoItem(photo, treatments)).join("")}</div>
         </div>
-        <div class="drop-zone" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}">
-          <div><strong>Arrastrá fotos acá</strong><span>${escapeHtml(loc.name)} · ${escapeHtml(moment.name)}</span></div>
-        </div>
-        <input class="hidden box-file-input" data-location-id="${escapeHtml(loc.id)}" data-moment-id="${escapeHtml(moment.id)}" type="file" accept="image/*,.heic,.heif" multiple>
-        <div class="photo-list">${photos.map(photo=>renderPhotoItem(photo, treatments)).join("")}</div>
       `;
       els.dropZones.appendChild(card);
     });
@@ -358,7 +371,11 @@ function renderDropZones(){
     input.addEventListener("change",e=>{ addPhotoFiles(e.target.files, locationId, momentId); input.value = ""; });
   });
   els.dropZones.querySelectorAll("[data-action='auto-assign-box']").forEach(btn=>{
-    btn.addEventListener("click",()=>autoAssignBox(btn.dataset.locationId, btn.dataset.momentId));
+    btn.addEventListener("click",e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      autoAssignBox(btn.dataset.locationId, btn.dataset.momentId);
+    });
   });
   els.dropZones.querySelectorAll("[data-action='treatment']").forEach(sel=>{
     sel.addEventListener("change",async()=>{
@@ -566,14 +583,14 @@ function addIndexSlide(slide, meta){
   addBackground(slide, meta);
   slide.addText("Índice del PowerPoint",{x:.75,y:.56,w:12,h:.35,fontFace:"Arial",fontSize:20,bold:true,color:"003B65"});
   slide.addShape("rect",{x:.8,y:1.05,w:11.75,h:5.6,fill:{color:"FFFFFF",transparency:4},line:{color:"E7DEF5"}});
-  const rows = [["Localidad","Momentos incluidos","Fotos"]];
+  const rows = [["Localidad","Trial","Momentos incluidos","Fotos"]];
   meta.locations.forEach(loc=>{
     const moments = loc.moments.map(m=>m.date ? `${m.name} (${m.date})` : m.name).join(" · ");
     const count = state.photos.filter(p=>p.locationId === loc.id).length;
-    rows.push([loc.name, moments || "-", String(count)]);
+    rows.push([loc.name, loc.trial || "-", moments || "-", String(count)]);
   });
-  const tableData = rows.map((row, rIdx)=>row.map(text=>({text, options:{bold:rIdx===0,color:rIdx===0?"FFFFFF":"17072C",fill:rIdx===0?{color:"4B2385"}:{color:"FFFFFF",transparency:0},fontSize:rIdx===0?10:8.5,margin:.06,breakLine:false}})));
-  slide.addTable(tableData,{x:1.05,y:1.3,w:11.25,h:Math.min(5.0,.38*rows.length),border:{type:"solid",color:"E7DEF5",pt:1},colW:[2.25,7.85,1.15],fontFace:"Arial",valign:"mid",fit:"shrink"});
+  const tableData = rows.map((row, rIdx)=>row.map(text=>({text, options:{bold:rIdx===0,color:rIdx===0?"FFFFFF":"17072C",fill:rIdx===0?{color:"4B2385"}:{color:"FFFFFF",transparency:0},fontSize:rIdx===0?10:8.2,margin:.06,breakLine:false}})));
+  slide.addTable(tableData,{x:1.05,y:1.3,w:11.25,h:Math.min(5.0,.38*rows.length),border:{type:"solid",color:"E7DEF5",pt:1},colW:[2.15,1.25,6.7,1.15],fontFace:"Arial",valign:"mid",fit:"shrink"});
 }
 function addSectionSlide(slide, meta, title, subtitle){
   addBackground(slide, meta);
@@ -619,7 +636,7 @@ async function createPptBlob(){
 
   for(const loc of meta.locations){
     slide = pptx.addSlide();
-    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, "Bloque 1 · Fotos ordenadas por momento");
+    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 1 · Fotos ordenadas por momento`);
 
     for(const moment of loc.moments){
       const photosMoment = state.photos.filter(p=>p.locationId === loc.id && p.momentId === moment.id && p.treatmentId).sort((a,b)=>a.order-b.order);
@@ -627,13 +644,13 @@ async function createPptBlob(){
       for(const group of chunk(ordered, meta.photosPerSlide)){
         slide = pptx.addSlide();
         const labels = group.map(p=>(meta.treatments.find(t=>t.id === p.treatmentId) || {}).name || "");
-        const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Momento: ${moment.name}   |   Fecha: ${moment.date || ""}`;
-        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${moment.name} · Por tratamiento`);
+        const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Momento: ${moment.name}   |   Fecha: ${moment.date || ""}`;
+        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${loc.trial || "Sin trial"} · ${moment.name} · Por tratamiento`);
       }
     }
 
     slide = pptx.addSlide();
-    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, "Bloque 2 · Fotos ordenadas por tratamiento");
+    addSectionSlide(slide, meta, `Localidad: ${loc.name}`, `Trial: ${loc.trial || "-"} · Bloque 2 · Fotos ordenadas por tratamiento`);
 
     for(const treatment of meta.treatments){
       const photosTreat = state.photos.filter(p=>p.locationId === loc.id && p.treatmentId === treatment.id).sort((a,b)=>a.order-b.order);
@@ -641,8 +658,8 @@ async function createPptBlob(){
       for(const group of chunk(ordered, meta.photosPerSlide)){
         slide = pptx.addSlide();
         const labels = group.map(p=>(loc.moments.find(m=>m.id === p.momentId) || {}).name || "");
-        const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Tratamiento: ${treatment.name}`;
-        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${treatment.name} · Por momento`);
+        const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Tratamiento: ${treatment.name}`;
+        await addPhotoRow(slide, group, labels, footer, meta, `${loc.name} · ${loc.trial || "Sin trial"} · ${treatment.name} · Por momento`);
       }
     }
   }
@@ -659,7 +676,7 @@ async function createPhotosZip(){
     const moment = (loc.moments || []).find(m=>m.id === photo.momentId) || {};
     const treatment = meta.treatments.find(t=>t.id === photo.treatmentId) || {};
     const labeled = await makeLabeledImage(photo, meta);
-    const base = sanitizeFileName(`${meta.protocolName}_${loc.name || "localidad"}_${moment.name || "momento"}_${treatment.name || "sin_tratamiento"}`);
+    const base = sanitizeFileName(`${meta.protocolName}_${loc.name || "localidad"}_${loc.trial || "trial"}_${moment.name || "momento"}_${treatment.name || "sin_tratamiento"}`);
     const n = used.get(base) || 0;
     used.set(base, n + 1);
     const name = `${base}${n ? `_foto_${n+1}` : ""}.jpg`;
@@ -736,7 +753,7 @@ async function loadProject(){
     state.step = project.step || 1;
   }else{
     state.locations = [
-      {id:uid("loc"), name:"Localidad 1", momentsText:"10 DDA |\n20 DDA |"}
+      {id:uid("loc"), name:"Localidad 1", trial:"", momentsText:"10 DDA |\n20 DDA |"}
     ];
   }
   state.hydrated = true;
