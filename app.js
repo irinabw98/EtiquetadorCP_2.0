@@ -354,11 +354,19 @@ function fileToDataUrl(file){
     r.readAsDataURL(file);
   });
 }
+function blobToDataUrl(blob){
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
 function loadImage(src){
   return new Promise((resolve,reject)=>{
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("No se pudo leer la imagen. Si es HEIC, verificá que la conversión esté disponible."));
+    img.onerror = () => reject(new Error("No se pudo leer la imagen."));
     img.src = src;
   });
 }
@@ -366,6 +374,7 @@ function loadScript(src){
   return new Promise((resolve,reject)=>{
     const existing = Array.from(document.scripts).find(s => s.src === src);
     if(existing){
+      if(existing.dataset.loaded === "true") return resolve();
       existing.addEventListener("load", resolve, {once:true});
       existing.addEventListener("error", reject, {once:true});
       return;
@@ -373,10 +382,33 @@ function loadScript(src){
     const script = document.createElement("script");
     script.src = src;
     script.async = true;
-    script.onload = resolve;
+    script.onload = () => { script.dataset.loaded = "true"; resolve(); };
     script.onerror = () => reject(new Error("No se pudo cargar la librería HEIC."));
     document.head.appendChild(script);
   });
+}
+function objectUrlToJpegDataUrl(objectUrl, quality=.98){
+  return loadImage(objectUrl).then(img=>{
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", quality);
+  });
+}
+async function tryNativeHeicDecode(file){
+  let objectUrl = "";
+  try{
+    objectUrl = URL.createObjectURL(file);
+    return await objectUrlToJpegDataUrl(objectUrl, .98);
+  }finally{
+    if(objectUrl) URL.revokeObjectURL(objectUrl);
+  }
 }
 async function ensureHeicConverter(){
   if(typeof window.heic2any === "function") return window.heic2any;
@@ -399,21 +431,47 @@ async function ensureHeicConverter(){
 }
 async function convertHeicToJpegDataUrl(file){
   const converter = await ensureHeicConverter();
-  const converted = await converter({
-    blob: file,
-    toType: "image/jpeg",
-    quality: .98
-  });
-  const blob = Array.isArray(converted) ? converted[0] : converted;
-  return fileToDataUrl(blob);
+  const attempts = [
+    {blob:file, toType:"image/jpeg", quality:.98},
+    {blob:new Blob([await file.arrayBuffer()], {type:"image/heic"}), toType:"image/jpeg", quality:.98},
+    {blob:new Blob([await file.arrayBuffer()], {type:"image/heif"}), toType:"image/jpeg", quality:.98}
+  ];
+
+  let lastError = null;
+  for(const options of attempts){
+    try{
+      const converted = await converter(options);
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+      return await blobToDataUrl(blob);
+    }catch(error){
+      lastError = error;
+      console.warn("Intento de conversión HEIC fallido", error);
+    }
+  }
+
+  throw lastError || new Error("Formato HEIC no compatible con el conversor del navegador.");
+}
+function buildHeicErrorMessage(file, error){
+  const msg = String(error?.message || error || "");
+  const fileName = file?.name || "la imagen HEIC";
+  if(msg.includes("ERR_LIBHEIF") || msg.toLowerCase().includes("format not supported")){
+    return `No se pudo convertir ${fileName}. Este HEIC usa una variante que el conversor web no soporta. Probá exportarla desde Fotos como JPG/PNG o en iPhone activá Ajustes > Cámara > Formatos > Más compatible para las próximas fotos.`;
+  }
+  return `No se pudo convertir ${fileName}. ${msg}`;
 }
 async function readImageFileAsUsableDataUrl(file){
   if(isHeicFile(file)){
     try{
+      return await tryNativeHeicDecode(file);
+    }catch(nativeError){
+      console.warn("El navegador no pudo abrir HEIC de forma nativa; se intenta con conversor.", nativeError);
+    }
+
+    try{
       return await convertHeicToJpegDataUrl(file);
     }catch(error){
       console.error("Error al convertir HEIC:", error);
-      throw new Error(`No se pudo convertir ${file?.name || "la imagen HEIC"}. ${error?.message || ""}`);
+      throw new Error(buildHeicErrorMessage(file, error));
     }
   }
 
@@ -425,7 +483,16 @@ async function readImageFileAsUsableDataUrl(file){
   }catch(error){
     const name = String(file?.name || "").toLowerCase();
     if(name.endsWith(".heic") || name.endsWith(".heif")){
-      return await convertHeicToJpegDataUrl(file);
+      try{
+        return await tryNativeHeicDecode(file);
+      }catch(nativeError){
+        console.warn("Fallback nativo HEIC fallido", nativeError);
+      }
+      try{
+        return await convertHeicToJpegDataUrl(file);
+      }catch(heicError){
+        throw new Error(buildHeicErrorMessage(file, heicError));
+      }
     }
     throw error;
   }

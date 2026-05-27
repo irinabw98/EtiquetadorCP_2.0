@@ -109,3 +109,11 @@ El archivo exportado se nombra con el nombre del protocolo.
 - Las fotos HEIC se convierten internamente a JPG de alta calidad para vista previa, ZIP y PowerPoint.
 - También se permite HEIC/HEIF como fondo del PowerPoint.
 - Se agregan mensajes de progreso y errores más claros durante la conversión HEIC.
+
+## Cambios V2.8
+
+- Soporte HEIC reforzado.
+- Primero intenta abrir HEIC de forma nativa con el navegador y convertirlo a JPG interno.
+- Si el navegador no puede abrirlo, intenta convertirlo con `heic2any`.
+- Se agregaron intentos alternativos para archivos `.HEIC/.HEIF` con tipo MIME poco claro.
+- Si el archivo usa una variante HEIC no soportada por el conversor web, muestra un mensaje más claro con la solución recomendada: exportar como JPG/PNG o usar `Ajustes > Cámara > Formatos > Más compatible` para próximas fotos.
