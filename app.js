@@ -210,6 +210,18 @@ function baseFileName(){
 function setStatus(text){
   if(els.exportStatus) els.exportStatus.textContent = text;
 }
+function yieldToBrowser(){
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+function idleToBrowser(){
+  return new Promise(resolve => {
+    if("requestIdleCallback" in window){
+      requestIdleCallback(()=>resolve(), {timeout:250});
+    }else{
+      setTimeout(resolve, 16);
+    }
+  });
+}
 
 function setStep(step){
   state.step = step;
@@ -332,33 +344,47 @@ function loadImage(src){
     img.src = src;
   });
 }
-async function normalizeImageFile(file, mode="original"){
-  let dataUrl;
+async function readImageFileAsUsableDataUrl(file){
   if(isHeicFile(file)){
     if(typeof window.heic2any !== "function") throw new Error("No se pudo cargar la librería HEIC.");
-    const converted = await window.heic2any({ blob:file, toType:"image/jpeg", quality:.95 });
+    const converted = await window.heic2any({ blob:file, toType:"image/jpeg", quality:.98 });
     const blob = Array.isArray(converted) ? converted[0] : converted;
-    dataUrl = await fileToDataUrl(blob);
-  }else{
-    dataUrl = await fileToDataUrl(file);
+    return fileToDataUrl(blob);
   }
-  return await normalizeDataUrlToCanvas(dataUrl, mode);
+  return fileToDataUrl(file);
 }
-async function normalizeDataUrlToCanvas(dataUrl, mode="original"){
+async function createPreviewThumbnail(dataUrl, maxSide=420){
   const img = await loadImage(dataUrl);
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
-  const maxSide = mode === "high" ? 2200 : mode === "light" ? 1400 : Math.max(srcW, srcH);
   const ratio = Math.min(1, maxSide / Math.max(srcW, srcH));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(srcW * ratio);
-  canvas.height = Math.round(srcH * ratio);
+  canvas.width = Math.max(1, Math.round(srcW * ratio));
+  canvas.height = Math.max(1, Math.round(srcH * ratio));
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  const quality = mode === "light" ? .78 : mode === "high" ? .92 : .95;
-  return { dataUrl: canvas.toDataURL("image/jpeg", quality), width: canvas.width, height: canvas.height };
+  return {
+    thumbDataUrl: canvas.toDataURL("image/jpeg", .72),
+    width: srcW,
+    height: srcH
+  };
+}
+async function preparePhotoFile(file){
+  const dataUrl = await readImageFileAsUsableDataUrl(file);
+  const preview = await createPreviewThumbnail(dataUrl, 420);
+  return {
+    dataUrl,
+    thumbDataUrl: preview.thumbDataUrl,
+    width: preview.width,
+    height: preview.height
+  };
+}
+async function normalizeImageFile(file, mode="original"){
+  const dataUrl = await readImageFileAsUsableDataUrl(file);
+  const img = await loadImage(dataUrl);
+  return { dataUrl, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height };
 }
 async function urlToDataUrl(url){
   if(!url || String(url).startsWith("data:")) return url;
@@ -390,31 +416,45 @@ function setBoxOpen(locationId, momentId, isOpen){
 async function addPhotoFiles(files, locationId, momentId){
   const clean = Array.from(files || []).filter(f => (f.type || "").startsWith("image/") || /\.(heic|heif)$/i.test(f.name || ""));
   if(!clean.length) return;
-  setStatus("Cargando fotos...");
+
+  setStatus(`Preparando ${clean.length} foto(s)...`);
   const next = [];
-  for(const file of clean){
+  const baseOrder = state.photos.reduce((max, p)=>Math.max(max, Number(p.order || 0)), -1) + 1;
+
+  for(let i=0;i<clean.length;i++){
+    const file = clean[i];
     try{
-      const fixed = await normalizeImageFile(file, getMeta().qualityMode);
+      setStatus(`Cargando foto ${i+1}/${clean.length}: ${file.name}`);
+      const fixed = await preparePhotoFile(file);
       next.push({
         id: uid("photo"),
         fileName: file.name,
         dataUrl: fixed.dataUrl,
+        thumbDataUrl: fixed.thumbDataUrl,
         width: fixed.width,
         height: fixed.height,
         locationId,
         momentId,
         treatmentId: "",
         rotation: 0,
-        order: state.photos.length + next.length
+        order: baseOrder + next.length
       });
     }catch(err){
       alert("No se pudo cargar " + file.name + ". " + (err?.message || ""));
     }
+
+    if((i + 1) % 3 === 0){
+      await yieldToBrowser();
+    }
   }
+
   state.photos.push(...next);
-  renderAll();
-  await saveProject();
-  setStatus("Fotos cargadas.");
+  renderDropZones();
+  renderStats();
+  renderProjectPreview();
+  await idleToBrowser();
+  saveProject();
+  setStatus(`${next.length} foto(s) cargadas. La calidad original queda preservada para exportar.`);
 }
 function groupPhotos(locationId, momentId){
   return state.photos.filter(p=>p.locationId === locationId && p.momentId === momentId).sort((a,b)=>a.order-b.order);
@@ -523,7 +563,7 @@ function renderPhotoItem(photo, treatments){
   const rotation = getRotation(photo);
   return `
     <div class="photo-item">
-      <div class="photo-thumb-wrap"><img src="${photo.dataUrl}" alt="${escapeHtml(photo.fileName)}" style="transform:rotate(${rotation}deg)"></div>
+      <div class="photo-thumb-wrap"><img src="${photo.thumbDataUrl || photo.dataUrl}" alt="${escapeHtml(photo.fileName)}" style="transform:rotate(${rotation}deg)"></div>
       <div class="photo-meta">
         <p>${escapeHtml(photo.fileName)}</p>
         <select data-action="treatment" data-photo-id="${escapeHtml(photo.id)}">
@@ -644,9 +684,8 @@ function chunk(arr,size){
   for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size));
   return out;
 }
-async function makeRotatedImageData(photo, quality=.95){
+async function makeRotatedImageData(photo, quality=.98){
   const rotation = getRotation(photo);
-  if(rotation === 0){ return {dataUrl: photo.dataUrl, width: photo.width, height: photo.height}; }
   const img = await loadImage(photo.dataUrl);
   const baseW = photo.width || img.naturalWidth || img.width;
   const baseH = photo.height || img.naturalHeight || img.height;
@@ -654,9 +693,11 @@ async function makeRotatedImageData(photo, quality=.95){
   const canvas = document.createElement("canvas");
   canvas.width = rotated ? baseH : baseW;
   canvas.height = rotated ? baseW : baseH;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", {alpha:false});
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(canvas.width / 2, canvas.height / 2);
   ctx.rotate((rotation * Math.PI) / 180);
@@ -665,7 +706,7 @@ async function makeRotatedImageData(photo, quality=.95){
   return {dataUrl: canvas.toDataURL("image/jpeg", quality), width: canvas.width, height: canvas.height};
 }
 async function makeLabeledImage(photo, meta){
-  const fixed = await makeRotatedImageData(photo, meta.qualityMode === "light" ? .82 : .95);
+  const fixed = await makeRotatedImageData(photo, meta.qualityMode === "light" ? .82 : .98);
   const img = await loadImage(fixed.dataUrl);
   const canvas = document.createElement("canvas");
   canvas.width = fixed.width;
@@ -699,7 +740,7 @@ async function makeLabeledImage(photo, meta){
     while(ctx.measureText(text).width > colW - 8 && text.length > 8) text = text.slice(0,-2) + "…";
     ctx.fillText(text, x, y0 + Math.round(bandH * .50));
   });
-  return canvas.toDataURL("image/jpeg", meta.qualityMode === "light" ? .82 : .95);
+  return canvas.toDataURL("image/jpeg", meta.qualityMode === "light" ? .82 : .98);
 }
 
 function addBackground(slide, meta){
@@ -747,7 +788,7 @@ async function addPhotoRow(slide, photos, bottomLabels, footerText, meta){
   const gap = .17;
   const cellW = (area.w - gap*(n-1))/n;
   const imgH = area.h - labelH - .08;
-  const fixed = await Promise.all(photos.map(p=>makeRotatedImageData(p, meta.qualityMode === "light" ? .82 : .95)));
+  const fixed = await Promise.all(photos.map(p=>makeRotatedImageData(p, meta.qualityMode === "light" ? .82 : .98)));
   fixed.forEach((fp,i)=>{
     const x = area.x + i*(cellW+gap);
     const fit = fitContain(fp.width, fp.height, cellW, imgH);
@@ -791,6 +832,7 @@ async function createPptBlob(){
         const labels = group.map(p=>(meta.treatments.find(t=>t.id === p.treatmentId) || {}).name || "");
         const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Momento: ${moment.name}   |   Fecha: ${moment.date || ""}`;
         await addPhotoRow(slide, group, labels, footer, meta);
+        await yieldToBrowser();
       }
     }
 
@@ -805,6 +847,7 @@ async function createPptBlob(){
         const labels = group.map(p=>(loc.moments.find(m=>m.id === p.momentId) || {}).name || "");
         const footer = `Protocolo: ${meta.protocolName}   |   Localidad: ${loc.name}   |   Trial: ${loc.trial || ""}   |   Tratamiento: ${treatment.name}`;
         await addPhotoRow(slide, group, labels, footer, meta);
+        await yieldToBrowser();
       }
     }
   }
@@ -827,6 +870,7 @@ async function createPhotosZip(){
     const name = `${base}${n ? `_foto_${n+1}` : ""}.jpg`;
     folder.file(name, dataUrlToBase64(labeled), {base64:true});
     setStatus(`Generando fotos ${i+1}/${state.photos.length}...`);
+    if((i + 1) % 3 === 0) await yieldToBrowser();
   }
   return zip;
 }
@@ -891,8 +935,8 @@ async function writeCurrentProject(){
   await dbSet("project_" + state.currentProjectId, project);
   await dbSet(ACTIVE_PROJECT_ID_KEY, state.currentProjectId);
   await upsertProjectInList(state.currentProjectId, getCurrentProjectTitle());
-  await refreshProjectSelector();
 }
+
 const saveProject = debounce(writeCurrentProject, 500);
 async function applyProject(project){
   if(project){
@@ -949,8 +993,8 @@ function bindEvents(){
   els.btnStepConfig?.addEventListener("click",()=>setStep(1));
   els.btnNewProject?.addEventListener("click",()=>startNewProject().catch(err=>{console.error(err);alert(err.message || err);}));
   els.btnNewProjectTop?.addEventListener("click",()=>startNewProject().catch(err=>{console.error(err);alert(err.message || err);}));
-  els.btnSaveProject?.addEventListener("click",()=>writeCurrentProject().then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
-  els.btnSaveProjectTop?.addEventListener("click",()=>writeCurrentProject().then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
+  els.btnSaveProject?.addEventListener("click",()=>writeCurrentProject().then(()=>refreshProjectSelector()).then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
+  els.btnSaveProjectTop?.addEventListener("click",()=>writeCurrentProject().then(()=>refreshProjectSelector()).then(()=>setStatus("Proyecto guardado localmente.")).catch(err=>{console.error(err);alert(err.message || err);}));
   els.projectSelect?.addEventListener("change",()=>loadProjectById(els.projectSelect.value).catch(err=>{console.error(err);alert(err.message || err);}));
   els.btnGoPhotos?.addEventListener("click",()=>{ if(!validateConfig()) return; renderAll(); setStep(2); });
   els.btnBackConfig?.addEventListener("click",()=>setStep(1));

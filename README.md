@@ -76,3 +76,13 @@ El archivo exportado se nombra con el nombre del protocolo.
 - Cada caja incluye botón propio para ordenar fotos por nombre.
 - Cada caja incluye botón propio para vaciar únicamente sus fotos.
 - Se mantienen los controles por foto para subir, bajar, rotar y eliminar.
+
+## Cambios de la versión V2.4
+
+- Optimización de carga para tandas grandes de fotos.
+- La carga ahora trabaja por pequeñas tandas y libera el navegador entre bloques para evitar que la página se congele.
+- Se generan miniaturas livianas solo para la vista previa, conservando la imagen original para exportación.
+- El PowerPoint y el ZIP se generan desde la imagen completa, sin reducir resolución por defecto.
+- Se agregaron mensajes de progreso durante la carga y la exportación.
+- El guardado local queda desacoplado del renderizado para reducir bloqueos al cargar muchas fotos.
+- La orientación se sigue fijando al exportar para evitar que PowerPoint rote imágenes por metadatos EXIF.
